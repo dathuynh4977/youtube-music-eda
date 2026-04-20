@@ -270,25 +270,29 @@ with tab3:
                         st.pyplot(fig)
 
 # -------------------------------
-# TAB 4: SIMILARITY (HEATMAP)
+# TAB 4: SIMILARITY
 # -------------------------------
 with tab4:
-    st.subheader("User Similarity (Heatmap)")
+    st.subheader("User Similarity")
 
     if watch_df.empty:
         st.warning("No watch data available")
     else:
+        # User-channel matrix
         matrix = pd.crosstab(watch_df['user'], watch_df['channel'])
 
         if matrix.shape[0] < 2 or matrix.shape[1] == 0:
-            st.warning("Need at least 2 users and valid channels")
+            st.warning("Need at least 2 users and valid channels for similarity analysis")
         else:
+            # -------------------------------
+            # Overall similarity heatmap
+            # -------------------------------
             sim = cosine_similarity(matrix)
             sim_df = pd.DataFrame(sim, index=matrix.index, columns=matrix.index)
 
-            # 🔥 HEATMAP (BEST VISUAL)
-            fig, ax = plt.subplots(figsize=(6, 5))
+            st.write("### Overall User Similarity Heatmap")
 
+            fig, ax = plt.subplots(figsize=(6, 5))
             sns.heatmap(
                 sim_df,
                 annot=True,
@@ -298,14 +302,130 @@ with tab4:
                 cbar=True,
                 ax=ax
             )
-
             ax.set_title("User Similarity Heatmap")
-
             st.pyplot(fig)
 
-            # Optional: still show table
-            with st.expander("Show raw similarity values"):
-                st.dataframe(sim_df)
+            # -------------------------------
+            # Choose users for breakdown
+            # -------------------------------
+            st.write("### Similarity Breakdown")
+
+            user_list = list(matrix.index)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                user_a = st.selectbox("Select first user", user_list, index=0)
+
+            with col2:
+                default_index = 1 if len(user_list) > 1 else 0
+                user_b = st.selectbox("Select second user", user_list, index=default_index)
+
+            if user_a == user_b:
+                st.info("Select two different users to compare.")
+            else:
+                # -------------------------------
+                # 1. Artist / Channel similarity
+                # -------------------------------
+                artist_sim = cosine_similarity(
+                    [matrix.loc[user_a].values],
+                    [matrix.loc[user_b].values]
+                )[0][0]
+
+                # -------------------------------
+                # 2. Time similarity by hour
+                # -------------------------------
+                user_a_df = watch_df[watch_df['user'] == user_a]
+                user_b_df = watch_df[watch_df['user'] == user_b]
+
+                hour_a = (
+                    user_a_df['hour']
+                    .value_counts(normalize=True)
+                    .reindex(range(24), fill_value=0)
+                )
+
+                hour_b = (
+                    user_b_df['hour']
+                    .value_counts(normalize=True)
+                    .reindex(range(24), fill_value=0)
+                )
+
+                time_sim = cosine_similarity(
+                    [hour_a.values],
+                    [hour_b.values]
+                )[0][0]
+
+                # -------------------------------
+                # 3. Seasonality similarity by month
+                # -------------------------------
+                month_a = (
+                    user_a_df['month']
+                    .value_counts(normalize=True)
+                    .reindex(range(1, 13), fill_value=0)
+                )
+
+                month_b = (
+                    user_b_df['month']
+                    .value_counts(normalize=True)
+                    .reindex(range(1, 13), fill_value=0)
+                )
+
+                season_sim = cosine_similarity(
+                    [month_a.values],
+                    [month_b.values]
+                )[0][0]
+
+                # -------------------------------
+                # Weighted final similarity score
+                # -------------------------------
+                final_score = (
+                    0.40 * artist_sim +
+                    0.30 * time_sim +
+                    0.30 * season_sim
+                )
+
+                # Metrics
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Artist/Channel Similarity", f"{artist_sim:.2f}")
+                m2.metric("Time Similarity", f"{time_sim:.2f}")
+                m3.metric("Season Similarity", f"{season_sim:.2f}")
+                m4.metric("Final Score", f"{final_score:.2f}")
+
+                # -------------------------------
+                # Similarity breakdown chart
+                # -------------------------------
+                labels = ["Artist", "Time", "Season"]
+                values = [artist_sim, time_sim, season_sim]
+
+                fig, ax = plt.subplots(figsize=(7, 5))
+                ax.bar(labels, values)
+                ax.set_ylim(0, 1)
+                ax.set_ylabel("Similarity Score")
+                ax.set_title(f"Similarity Breakdown: {user_a} vs {user_b}")
+
+                for i, v in enumerate(values):
+                    ax.text(i, v + 0.02, f"{v:.2f}", ha="center")
+
+                st.pyplot(fig)
+
+                # -------------------------------
+                # Interpretation
+                # -------------------------------
+                st.write("### Interpretation")
+
+                st.write(
+                    f"""
+                    The similarity comparison between **{user_a}** and **{user_b}** shows:
+
+                    - **Artist/Channel similarity:** `{artist_sim:.2f}`
+                    - **Time similarity:** `{time_sim:.2f}`
+                    - **Seasonality similarity:** `{season_sim:.2f}`
+                    - **Weighted final similarity score:** `{final_score:.2f}`
+
+                    A high time or season score means the users listen during similar periods.
+                    A low artist/channel score means they do not share many of the same channels or artists.
+                    """
+                )
 
 # -------------------------------
 # TAB 5: CLASSIFICATION
