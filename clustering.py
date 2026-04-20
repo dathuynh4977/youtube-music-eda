@@ -1,62 +1,50 @@
-import numpy as np
 from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+import numpy as np
 import matplotlib.pyplot as plt
 
-
-# Build behavior vector for each user
-def build_user_vector(df, user):
-    user_df = df[df['user'] == user]
-
-    # Hour distribution (24 features)
-    hour_dist = user_df['hour'].value_counts(normalize=True)
-    hour_vec = np.zeros(24)
-    for h, v in hour_dist.items():
-        hour_vec[int(h)] = v
-
-    # Month distribution (12 features)
-    month_dist = user_df['month'].value_counts(normalize=True)
-    month_vec = np.zeros(12)
-    for m, v in month_dist.items():
-        month_vec[int(m) - 1] = v
-
-    return np.concatenate([hour_vec, month_vec])
-
-
-# MAIN clustering function
 def run_clustering(df):
-    users = df['user'].unique()
+    # Aggregate per user
+    user_features = df.groupby('user').agg({
+        'hour': 'mean',
+        'month': 'mean',
+        'year': 'mean'
+    })
 
-    vectors = []
-    for u in users:
-        vectors.append(build_user_vector(df, u))
+    users = user_features.index.tolist()
+    X = user_features.values
 
-    X = np.array(vectors)
-
-    model = KMeans(n_clusters=2)
-    clusters = model.fit_predict(X)
+    kmeans = KMeans(n_clusters=2, random_state=42)
+    clusters = kmeans.fit_predict(X)
 
     return users, X, clusters
 
 
-# Visualization
-from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
-
-
 def plot_clusters(users, X, clusters):
-    # Apply PCA to reduce to 2D
     pca = PCA(n_components=2)
     X_reduced = pca.fit_transform(X)
 
-    # Plot
-    plt.scatter(X_reduced[:, 0], X_reduced[:, 1], c=clusters)
+    plt.figure()
 
-    # Label points
-    for i, u in enumerate(users):
-        plt.annotate(u, (X_reduced[i, 0], X_reduced[i, 1]))
+    # If only 2 points → flatten to 1D
+    if len(X_reduced) <= 2:
+        plt.scatter(X_reduced[:, 0], [0]*len(X_reduced), c=clusters)
 
-    plt.title("User Clustering (PCA Projection)")
-    plt.xlabel("Principal Component 1")
-    plt.ylabel("Principal Component 2")
+        for i, u in enumerate(users):
+            plt.annotate(u, (X_reduced[i, 0], 0))
 
+        plt.title("User Clustering (PCA - 1D Projection)")
+        plt.xlabel("Principal Component 1")
+        plt.yticks([])
+    else:
+        plt.scatter(X_reduced[:, 0], X_reduced[:, 1], c=clusters)
+
+        for i, u in enumerate(users):
+            plt.annotate(u, (X_reduced[i, 0], X_reduced[i, 1]))
+
+        plt.title("User Clustering (PCA Projection)")
+        plt.xlabel("PC1")
+        plt.ylabel("PC2")
+
+    plt.grid(True)
     plt.show()

@@ -1,9 +1,27 @@
 from sklearn.ensemble import IsolationForest
+import matplotlib.pyplot as plt
 
 def detect_outliers(df):
-    model = IsolationForest(contamination=0.05)
+    features = df[['hour', 'month']]
+    
+    model = IsolationForest(contamination=0.05, random_state=42)
+    df['outlier'] = model.fit_predict(features)
 
-    X = df[['hour', 'month']]
-    df['outlier'] = model.fit_predict(X)
+    outliers = df[df['outlier'] == -1]
+    return outliers
 
-    return df[df['outlier'] == -1]
+
+def plot_outliers(df, outliers):
+    plt.figure()
+
+    # normal points
+    plt.scatter(df['hour'], df['month'], alpha=0.2)
+
+    # outliers
+    plt.scatter(outliers['hour'], outliers['month'])
+
+    plt.title("Outlier Detection (Isolation Forest)")
+    plt.xlabel("Hour")
+    plt.ylabel("Month")
+
+    plt.show()
