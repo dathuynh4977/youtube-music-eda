@@ -1,65 +1,71 @@
-from load_data3 import load_all_data
-from similarity import compute_similarity
+from load_data3 import load_all_data, get_watch_data
+from similarity import compute_similarity, similarity_breakdown
 from classification import run_classification
 from clustering import run_clustering, plot_clusters
-from outliers import detect_outliers, plot_outliers
-from recommender import recommend_artists
+from outliers import detect_outliers
 
-import matplotlib.pyplot as plt
-
-# -----------------------------------------
+# -------------------------------
 # LOAD DATA
-# -----------------------------------------
+# -------------------------------
 df = load_all_data()
+watch_df = get_watch_data(df)
 
-# -----------------------------------------
+print("\n========== CHECKPOINT 3 RESULTS ==========")
+print("Total rows:", len(df))
+print("Watch rows:", len(watch_df))
+
+print("\nUsers:")
+print(watch_df["user"].value_counts())
+
+# -------------------------------
 # 1. SIMILARITY
-# -----------------------------------------
+# -------------------------------
 print("\n--- Similarity ---")
+compute_similarity(watch_df)
+similarity_breakdown(watch_df)
 
-sim_score, artist_sim, time_sim, season_sim = compute_similarity(df)
-
-print("Similarity Score:", sim_score)
-
-# Visualization
-plt.figure()
-plt.bar(['Artist', 'Time', 'Season'], [artist_sim, time_sim, season_sim])
-plt.title("User Similarity Breakdown")
-plt.ylabel("Similarity Score")
-plt.ylim(0, 1)
-plt.show()
-
-# -----------------------------------------
+# -------------------------------
 # 2. CLASSIFICATION
-# -----------------------------------------
+# -------------------------------
 print("\n--- Classification ---")
-model = run_classification(df)
+run_classification(watch_df)
 
-# -----------------------------------------
-# 3. CLUSTERING (PCA FIXED)
-# -----------------------------------------
+# -------------------------------
+# 3. CLUSTERING
+# -------------------------------
 print("\n--- Clustering ---")
-
-users, X, clusters = run_clustering(df)
+users, X, clusters = run_clustering(watch_df)
 plot_clusters(users, X, clusters)
 
-# -----------------------------------------
+print("\nUser Clusters:")
+for user, cluster in zip(users, clusters):
+    print(user, "-> Cluster", cluster)
+
+# -------------------------------
 # 4. OUTLIER DETECTION
-# -----------------------------------------
+# -------------------------------
 print("\n--- Outlier Detection ---")
+outliers = detect_outliers(watch_df)
 
-outliers = detect_outliers(df)
-plot_outliers(df, outliers)
-
-print("Total outliers:", len(outliers))
-print(outliers[['title', 'artist', 'hour']].head())
-
-# -----------------------------------------
+# -------------------------------
 # 5. BONUS RECOMMENDER
-# -----------------------------------------
-print("\n--- Bonus Recommender ---")
+# -------------------------------
+try:
+    from recommender import recommend_artists
 
-recommendations = recommend_artists(df, target_user='user1', outliers_df=outliers, top_n=10)
+    print("\n--- Bonus Recommender ---")
+    first_user = sorted(watch_df["user"].unique())[0]
 
-print("\nTop recommendations for user1:")
-print(recommendations.to_string(index=False))
+    recommendations = recommend_artists(
+        watch_df,
+        target_user=first_user,
+        outliers_df=outliers,
+        top_n=10
+    )
+
+    print(f"\nTop recommendations for {first_user}:")
+    print(recommendations.to_string(index=False))
+
+except Exception as e:
+    print("\nRecommender skipped because of error:")
+    print(e)

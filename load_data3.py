@@ -1,76 +1,181 @@
 import json
+import os
 import pandas as pd
 
-# -----------------------------------------
-# HELPER: LOAD ONE USER
-# -----------------------------------------
-def load_user(watch_path, search_path, user_name):
-    with open(watch_path, "r", encoding="utf-8") as f:
-        watch_data = json.load(f)
 
-    print(f"[{user_name}] Watch entries:", len(watch_data))
+def clean_user_name(filename):
+    user = filename.replace(".json", "")
+    user = user.replace("_watch-history", "")
+    user = user.replace("_search-history", "")
+    return user
 
-    df = pd.DataFrame(watch_data)
 
-    # Keep useful columns
-    df = df[['title', 'time', 'subtitles']]
+def get_season(month):
+    if month in [12, 1, 2]:
+        return "Winter"
+    elif month in [3, 4, 5]:
+        return "Spring"
+    elif month in [6, 7, 8]:
+        return "Summer"
+    else:
+        return "Fall"
 
-    # Extract artist (channel)
-    def get_artist(x):
-        try:
-            return x[0]['name']
-        except:
-            return None
 
-    df['artist'] = df['subtitles'].apply(get_artist)
+def extract_artist(x):
+    try:
+        if isinstance(x, list) and len(x) > 0:
+            return x[0].get("name", None)
+    except Exception:
+        return None
+    return None
 
-    # Convert time
-    df['time'] = pd.to_datetime(df['time'], format='ISO8601')
 
-    # Extract features
-    df['year'] = df['time'].dt.year
-    df['month'] = df['time'].dt.month
-    df['day'] = df['time'].dt.day
-    df['hour'] = df['time'].dt.hour
-    df['weekday'] = df['time'].dt.day_name()
+def process_history_file(path, user_id, data_type):
+    """
+    data_type should be:
+    - Watch
+    - Search
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-    # Season
-    def get_season(m):
-        if m in [12, 1, 2]:
-            return 'Winter'
-        elif m in [3, 4, 5]:
-            return 'Spring'
-        elif m in [6, 7, 8]:
-            return 'Summer'
-        else:
-            return 'Fall'
+    print(f"[{user_id}] {data_type} entries:", len(data))
 
-    df['season'] = df['month'].apply(get_season)
+    df = pd.DataFrame(data)
 
-    df['user'] = user_name
+    if "title" not in df.columns or "time" not in df.columns:
+        print(f"Skipping {path}: missing title/time")
+        return pd.DataFrame()
+
+    cols = ["title", "time"]
+    if "subtitles" in df.columns:
+        cols.append("subtitles")
+
+    df = df[cols].copy()
+
+    if "subtitles" in df.columns:
+        df["artist"] = df["subtitles"].apply(extract_artist)
+    else:
+        df["artist"] = None
+
+    df["time"] = pd.to_datetime(df["time"], format="ISO8601", errors="coerce")
+    df = df.dropna(subset=["time"])
+
+    df["year"] = df["time"].dt.year
+    df["month"] = df["time"].dt.month
+    df["day"] = df["time"].dt.day
+    df["hour"] = df["time"].dt.hour
+    df["weekday"] = df["time"].dt.day_name()
+    df["season"] = df["month"].apply(get_season)
+
+    df["title"] = (
+        df["title"]
+        .astype(str)
+        .str.replace("Watched ", "", regex=False)
+        .str.replace("Searched for ", "", regex=False)
+    )
+
+    df["user"] = user_id
+    df["type"] = data_type
 
     return df
 
 
-# -----------------------------------------
-# MAIN FUNCTION (THIS WAS MISSING)
-# -----------------------------------------
 def load_all_data():
-    df1 = load_user(
-        "user1_watch-history.json",
-        "user1_search-history.json",
-        "user1"
-    )
+    """
+    Automatically loads every pair:
+    user*_watch-history.json
+    user*_search-history.json
 
-    df2 = load_user(
-        "user2_watch-history.json",
-        "user2_search-history.json",
-        "user2"
-    )
+    Search file is optional, but watch file is required for ML.
+    """
+    all_dfs = []
 
-    df = pd.concat([df1, df2], ignore_index=True)
+    watch_files = sorted([
+        f for f in os.listdir(".")
+        if f.startswith("user") and f.endswith("_watch-history.json")
+    ])
 
-    print("\nTotal combined entries:", len(df))
-    print("Users distribution:\n", df['user'].value_counts())
+    if not watch_files:
+        raise FileNotFoundError("No user*_watch-history.json files found in this folder.")
 
-    return df
+    print("\nUsers detected:")
+
+    for watch_file in watch_files:
+        user_id = clean_user_name(watch_file)
+        search_file = f"{user_id}_search-history.json"
+
+        print(f"\nLoading {user_id}:")
+        print("-", watch_file)
+
+        watch_df = process_history_file(watch_file, user_id, "Watch")
+        if not watch_df.empty:
+            all_dfs.append(watch_df)
+
+        if os.path.exists(search_file):
+            print("-", search_file)
+            search_df = process_history_file(search_file, user_id, "Search")
+            if not search_df.empty:
+                all_dfs.append(search_df)
+        else:
+            print(f"- {search_file} not found, skipping search history")
+
+    if not all_dfs:
+        raise ValueError("No valid data loaded.")
+
+    combined = pd.concat(all_dfs, ignore_index=True)
+
+    print("\nTotal combined entries:", len(combined))
+
+    print("\nUsers distribution:")
+    print(combined["user"].value_counts())
+
+    print("\nData type distribution:")
+    print(combined["type"].value_counts())
+
+    return combined
+
+
+def get_watch_data(df):
+    """
+    Use this helper in ML files so search history does not pollute:
+    similarity, classification, clustering, outliers, recommender.
+    """
+    return df[
+        (df["type"] == "Watch") &
+        (df["artist"].notna())
+    ].copy()
+
+
+def summarize(df):
+    print("\n========== DATA SUMMARY ==========")
+
+    print("\nTotal rows:", len(df))
+
+    print("\nUsers:")
+    print(df["user"].value_counts())
+
+    print("\nData Types:")
+    print(df["type"].value_counts())
+
+    print("\nYears distribution:")
+    print(df["year"].value_counts())
+
+    watch_df = get_watch_data(df)
+
+    print("\nTop Artists / Channels:")
+    print(watch_df["artist"].value_counts().head(10))
+
+    print("\nSeason Distribution:")
+    print(df["season"].value_counts())
+
+    print("\nHourly Distribution:")
+    print(df["hour"].value_counts().sort_index())
+
+
+if __name__ == "__main__":
+    df = load_all_data()
+    summarize(df)
+
+    print("\nSample data:")
+    print(df.head())
